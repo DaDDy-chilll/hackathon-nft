@@ -75,6 +75,11 @@ const Navbar = () => {
             <Link to="/submit" className="text-foreground/80 hover:text-foreground transition-colors">
               Submit Project
             </Link>
+            {isConnected && (
+              <Link to="/my-nfts" className="text-foreground/80 hover:text-foreground transition-colors">
+                My NFTs
+              </Link>
+            )}
             <Link to="/about" className="text-foreground/80 hover:text-foreground transition-colors">
               About
             </Link>

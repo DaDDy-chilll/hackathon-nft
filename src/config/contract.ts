@@ -4,7 +4,7 @@
 export const CONTRACTS = {
   // Polygon Amoy Testnet
   AMOY: {
-    HACKNFT_ADDRESS: "0x0000000000000000000000000000000000000000", // Replace with deployed address
+    HACKNFT_ADDRESS: "0x19f032FE0C9F5a563A699E473d9FDe0bd909Bf55", // Replace with deployed address
     CHAIN_ID: 80002,
   },
   // Polygon Mainnet
@@ -67,6 +67,146 @@ export const HACKNFT_ABI = [
     type: "function",
   },
   {
+    inputs: [],
+    name: "getAllTokenIds",
+    outputs: [{ internalType: "uint256[]", name: "", type: "uint256[]" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "owner", type: "address" }],
+    name: "getTokensByOwner",
+    outputs: [{ internalType: "uint256[]", name: "", type: "uint256[]" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
+    name: "tokenURI",
+    outputs: [{ internalType: "string", name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
+    name: "ownerOf",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "owner", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "from", type: "address" },
+      { internalType: "address", name: "to", type: "address" },
+      { internalType: "uint256", name: "tokenId", type: "uint256" },
+    ],
+    name: "transferFrom",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "from", type: "address" },
+      { internalType: "address", name: "to", type: "address" },
+      { internalType: "uint256", name: "tokenId", type: "uint256" },
+    ],
+    name: "safeTransferFrom",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "tokenId", type: "uint256" },
+      { internalType: "uint256", name: "fundingGoal", type: "uint256" },
+    ],
+    name: "enableFunding",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "tokenId", type: "uint256" },
+      { internalType: "uint256", name: "newGoal", type: "uint256" },
+    ],
+    name: "updateFundingGoal",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
+    name: "fundProject",
+    outputs: [],
+    stateMutability: "payable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "tokenId", type: "uint256" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+    ],
+    name: "withdrawFunds",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
+    name: "getFundingInfo",
+    outputs: [
+      { internalType: "uint256", name: "fundingGoal", type: "uint256" },
+      { internalType: "uint256", name: "totalFunded", type: "uint256" },
+      { internalType: "uint256", name: "withdrawnAmount", type: "uint256" },
+      { internalType: "uint256", name: "availableFunds", type: "uint256" },
+      { internalType: "bool", name: "fundingEnabled", type: "bool" },
+      { internalType: "uint256", name: "backerCount", type: "uint256" },
+      { internalType: "uint256", name: "percentageFunded", type: "uint256" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "tokenId", type: "uint256" },
+      { internalType: "address", name: "backer", type: "address" },
+    ],
+    name: "getContribution",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
+    name: "getProjectBackers",
+    outputs: [{ internalType: "address[]", name: "", type: "address[]" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
+    name: "disableFunding",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
+    name: "isFundingGoalReached",
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     anonymous: false,
     inputs: [
       { indexed: true, internalType: "uint256", name: "tokenId", type: "uint256" },
@@ -76,6 +216,26 @@ export const HACKNFT_ABI = [
       { indexed: false, internalType: "bytes32", name: "projectHash", type: "bytes32" },
     ],
     name: "ProjectMinted",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "uint256", name: "tokenId", type: "uint256" },
+      { indexed: false, internalType: "uint256", name: "fundingGoal", type: "uint256" },
+    ],
+    name: "FundingEnabled",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "uint256", name: "tokenId", type: "uint256" },
+      { indexed: true, internalType: "address", name: "backer", type: "address" },
+      { indexed: false, internalType: "uint256", name: "amount", type: "uint256" },
+      { indexed: false, internalType: "uint256", name: "totalFunded", type: "uint256" },
+    ],
+    name: "ProjectFunded",
     type: "event",
   },
 ] as const;

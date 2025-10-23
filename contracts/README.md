@@ -1,140 +1,57 @@
-# HackNFT Smart Contract
+# Sample Hardhat 3 Beta Project (`node:test` and `viem`)
 
-## Overview
-ERC-721 NFT contract for minting hackathon project NFTs on Polygon. Each NFT represents a verified hackathon project with on-chain metadata.
+This project showcases a Hardhat 3 Beta project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
 
-## Features
-- **Free Minting**: No gas fees for minters (only deployer pays)
-- **Duplicate Prevention**: Each project can only be minted once
-- **On-Chain Metadata**: Project details stored directly on blockchain
-- **ERC-6551 Compatible**: Ready for Token-Bound Account upgrades
+To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
 
-## Deployment Instructions
+## Project Overview
 
-### Prerequisites
-```bash
-npm install --save-dev hardhat @nomicfoundation/hardhat-toolbox
-npm install @openzeppelin/contracts
-```
+This example project includes:
 
-### 1. Initialize Hardhat
-```bash
-npx hardhat init
-```
+- A simple Hardhat configuration file.
+- Foundry-compatible Solidity unit tests.
+- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
+- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
 
-### 2. Configure Hardhat (hardhat.config.js)
-```javascript
-require("@nomicfoundation/hardhat-toolbox");
-require("dotenv").config();
+## Usage
 
-module.exports = {
-  solidity: "0.8.20",
-  networks: {
-    polygonAmoy: {
-      url: "https://rpc-amoy.polygon.technology/",
-      accounts: [process.env.PRIVATE_KEY],
-    },
-    polygon: {
-      url: "https://polygon-rpc.com/",
-      accounts: [process.env.PRIVATE_KEY],
-    },
-  },
-  etherscan: {
-    apiKey: process.env.POLYGONSCAN_API_KEY,
-  },
-};
-```
+### Running Tests
 
-### 3. Create Deployment Script (scripts/deploy.js)
-```javascript
-const hre = require("hardhat");
+To run all the tests in the project, execute the following command:
 
-async function main() {
-  const HackNFT = await hre.ethers.getContractFactory("HackNFT");
-  const hackNFT = await HackNFT.deploy();
-  await hackNFT.waitForDeployment();
-
-  const address = await hackNFT.getAddress();
-  console.log("HackNFT deployed to:", address);
-  
-  // Wait for block confirmations
-  await hackNFT.deploymentTransaction().wait(5);
-  
-  // Verify contract
-  await hre.run("verify:verify", {
-    address: address,
-    constructorArguments: [],
-  });
-}
-
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
-```
-
-### 4. Deploy to Polygon Amoy (Testnet)
-```bash
-npx hardhat run scripts/deploy.js --network polygonAmoy
-```
-
-### 5. Deploy to Polygon Mainnet
-```bash
-npx hardhat run scripts/deploy.js --network polygon
-```
-
-## Environment Variables
-Create a `.env` file:
-```
-PRIVATE_KEY=your_wallet_private_key
-POLYGONSCAN_API_KEY=your_polygonscan_api_key
-```
-
-## Contract Functions
-
-### `mintProject(projectName, teamName, githubUrl, tokenURI)`
-Free mint function for teams to create their project NFT.
-
-### `getProjectMetadata(tokenId)`
-Retrieve on-chain metadata for a specific project.
-
-### `isProjectMinted(projectName, teamName, githubUrl)`
-Check if a project has already been minted.
-
-### `totalSupply()`
-Get total number of minted project NFTs.
-
-## Frontend Integration
-After deployment, update the contract address in `src/config/contract.ts`:
-```typescript
-export const HACKNFT_CONTRACT_ADDRESS = "0x..."; // Your deployed address
-```
-
-## ERC-6551 Upgrade Path
-To enable Token-Bound Accounts for crowdfunding:
-1. Deploy ERC-6551 Registry
-2. Deploy Account Implementation
-3. Create token-bound accounts for each NFT
-4. NFTs can now hold and receive ERC-20 tokens
-
-## Security Considerations
-- Contract is Ownable (only owner can perform admin functions)
-- Duplicate minting prevention via project hash
-- Standard ERC-721 security features
-- Consider auditing before mainnet deployment
-
-## Gas Optimization
-- Uses Counters library for efficient token ID tracking
-- Minimal on-chain storage
-- Efficient hash-based duplicate detection
-
-## Testing
-```bash
+```shell
 npx hardhat test
 ```
 
-## Verification
-After deployment, verify on PolygonScan for transparency:
-```bash
-npx hardhat verify --network polygonAmoy DEPLOYED_ADDRESS
+You can also selectively run the Solidity or `node:test` tests:
+
+```shell
+npx hardhat test solidity
+npx hardhat test nodejs
+```
+
+### Make a deployment to Sepolia
+
+This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+
+To run the deployment to a local chain:
+
+```shell
+npx hardhat ignition deploy ignition/modules/Counter.ts
+```
+
+To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+
+You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+
+To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
+
+```shell
+npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+```
+
+After setting the variable, you can run the deployment with the Sepolia network:
+
+```shell
+npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
 ```

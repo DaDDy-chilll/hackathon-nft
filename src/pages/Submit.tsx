@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import MetaMaskInstructions from "@/components/MetaMaskInstructions";
@@ -8,16 +8,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, usePublicClient } from "wagmi";
 import { polygonAmoy } from "wagmi/chains";
 import { CONTRACTS, HACKNFT_ABI } from "@/config/contract";
-import { Loader2, ExternalLink, CheckCircle } from "lucide-react";
+import { Loader2, ExternalLink, CheckCircle, Upload, Image as ImageIcon, AlertCircle } from "lucide-react";
+import { decodeEventLog } from "viem";
 
 const Submit = () => {
   const { toast } = useToast();
   const { address, isConnected } = useAccount();
   const { writeContract, data: hash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+  const { isLoading: isConfirming, isSuccess, data: receipt } = useWaitForTransactionReceipt({ hash });
+  const publicClient = usePublicClient();
 
   const [showMetaMaskInstructions, setShowMetaMaskInstructions] = useState(false);
   const [formData, setFormData] = useState({
@@ -29,14 +31,123 @@ const Submit = () => {
     tags: "",
     members: "",
   });
+  const [projectImage, setProjectImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
+  const [isUploading, setIsUploading] = useState(false);
   const [mintedTokenId, setMintedTokenId] = useState<string | null>(null);
+  const [uploadedTokenURI, setUploadedTokenURI] = useState<string>("");
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({ ...formData, [e.target.id]: e.target.value });
   };
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setProjectImage(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Upload image to Pinata
+  const uploadImageToPinata = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+      method: 'POST',
+      headers: {
+        pinata_api_key: import.meta.env.VITE_PINATA_API_KEY || '',
+        pinata_secret_api_key: import.meta.env.VITE_PINATA_SECRET_KEY || '',
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to upload image to Pinata');
+    }
+
+    const data = await response.json();
+    return `https://gateway.pinata.cloud/ipfs/${data.IpfsHash}`;
+  };
+
+  // Upload metadata to Pinata
+  const uploadMetadataToPinata = async (metadata: any): Promise<string> => {
+    const response = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        pinata_api_key: import.meta.env.VITE_PINATA_API_KEY || '',
+        pinata_secret_api_key: import.meta.env.VITE_PINATA_SECRET_KEY || '',
+      },
+      body: JSON.stringify(metadata),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to upload metadata to Pinata');
+    }
+
+    const data = await response.json();
+    return `https://gateway.pinata.cloud/ipfs/${data.IpfsHash}`;
+  };
+
+  // Extract token ID from transaction receipt
+  useEffect(() => {
+    if (isSuccess && receipt) {
+      try {
+        // Find the ProjectMinted event in the logs
+        const projectMintedLog = receipt.logs.find((log) => {
+          try {
+            const decoded = decodeEventLog({
+              abi: HACKNFT_ABI,
+              data: log.data,
+              topics: log.topics,
+            });
+            return decoded.eventName === 'ProjectMinted';
+          } catch {
+            return false;
+          }
+        });
+
+        if (projectMintedLog) {
+          const decoded = decodeEventLog({
+            abi: HACKNFT_ABI,
+            data: projectMintedLog.data,
+            topics: projectMintedLog.topics,
+          });
+          
+          if (decoded.eventName === 'ProjectMinted' && decoded.args) {
+            const tokenId = decoded.args.tokenId?.toString();
+            setMintedTokenId(tokenId || null);
+            
+            toast({
+              title: "NFT Minted Successfully! 🎉",
+              description: `Token ID: ${tokenId}. Your NFT will appear shortly.`,
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error extracting token ID:', error);
+      }
+    }
+  }, [isSuccess, receipt, toast]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Check if contract is deployed
+    if (CONTRACTS.AMOY.HACKNFT_ADDRESS === "0x0000000000000000000000000000000000000000") {
+      toast({
+        title: "Contract Not Deployed",
+        description: "Please deploy the smart contract first. See README.md for instructions.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Check if MetaMask is available
     if (typeof window.ethereum === "undefined") {
@@ -54,24 +165,49 @@ const Submit = () => {
       return;
     }
 
-    // Prepare metadata for IPFS (in production, upload to IPFS first)
-    const metadata = {
-      name: formData.name,
-      description: formData.description,
-      image: "ipfs://placeholder", // Replace with actual IPFS image
-      attributes: [
-        { trait_type: "Team", value: formData.team },
-        { trait_type: "GitHub", value: formData.github },
-        { trait_type: "Demo", value: formData.demo },
-        { trait_type: "Tags", value: formData.tags },
-      ],
-    };
-
-    // In production, upload metadata to IPFS and get URI
-    const tokenURI = `ipfs://placeholder/${formData.name}`; // Replace with actual IPFS URI
-
     try {
+      setIsUploading(true);
+
+      // Upload image to IPFS if provided
+      let imageUrl = "";
+      if (projectImage) {
+        toast({
+          title: "Uploading Image...",
+          description: "Uploading your project image to IPFS.",
+        });
+        imageUrl = await uploadImageToPinata(projectImage);
+      }
+
+      // Prepare metadata
+      const metadata = {
+        name: formData.name,
+        description: formData.description,
+        image: imageUrl || "https://via.placeholder.com/400",
+        attributes: [
+          { trait_type: "Team", value: formData.team },
+          { trait_type: "GitHub", value: formData.github },
+          { trait_type: "Demo", value: formData.demo || "N/A" },
+          { trait_type: "Tags", value: formData.tags || "N/A" },
+          { trait_type: "Members", value: formData.members || "N/A" },
+        ],
+      };
+
+      // Upload metadata to IPFS
+      toast({
+        title: "Uploading Metadata...",
+        description: "Uploading project metadata to IPFS.",
+      });
+      const tokenURI = await uploadMetadataToPinata(metadata);
+      setUploadedTokenURI(tokenURI);
+
+      setIsUploading(false);
+
       // Call the mint function
+      toast({
+        title: "Minting NFT...",
+        description: "Please confirm the transaction in MetaMask.",
+      });
+
       writeContract({
         address: CONTRACTS.AMOY.HACKNFT_ADDRESS as `0x${string}`,
         abi: HACKNFT_ABI,
@@ -80,15 +216,11 @@ const Submit = () => {
         chain: polygonAmoy,
         account: address!,
       });
-
+    } catch (err: any) {
+      setIsUploading(false);
       toast({
-        title: "Minting in Progress...",
-        description: "Please confirm the transaction in MetaMask.",
-      });
-    } catch (err) {
-      toast({
-        title: "Minting Failed",
-        description: error?.message || "Failed to mint NFT. Please try again.",
+        title: "Upload Failed",
+        description: err?.message || "Failed to upload to IPFS. Please try again.",
         variant: "destructive",
       });
     }
@@ -217,9 +349,39 @@ const Submit = () => {
                     rows={4}
                     value={formData.members}
                     onChange={handleInputChange}
-                    disabled={isPending || isConfirming}
+                    disabled={isPending || isConfirming || isUploading}
                     className="text-base glass-card"
                   />
+                </div>
+
+                {/* Project Image */}
+                <div className="space-y-2">
+                  <Label htmlFor="image" className="text-base">Project Image</Label>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center gap-4">
+                      <Input
+                        id="image"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageChange}
+                        disabled={isPending || isConfirming || isUploading}
+                        className="h-12 text-base glass-card"
+                      />
+                      <Upload className="w-5 h-5 text-muted-foreground" />
+                    </div>
+                    {imagePreview && (
+                      <div className="relative w-full max-w-md mx-auto">
+                        <img
+                          src={imagePreview}
+                          alt="Project preview"
+                          className="w-full h-auto rounded-lg border-2 border-primary/20"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Upload an image that represents your project (optional)
+                  </p>
                 </div>
 
                 {/* Submit Button */}
@@ -229,9 +391,14 @@ const Submit = () => {
                     variant="hero" 
                     size="lg" 
                     className="w-full"
-                    disabled={isPending || isConfirming || !isConnected}
+                    disabled={isPending || isConfirming || isUploading || !isConnected}
                   >
-                    {isPending || isConfirming ? (
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        Uploading to IPFS...
+                      </>
+                    ) : isPending || isConfirming ? (
                       <>
                         <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                         {isPending ? "Confirm in MetaMask..." : "Minting NFT..."}
@@ -248,6 +415,34 @@ const Submit = () => {
           </Card>
 
           {/* Success Card */}
+          {/* Contract Not Deployed Warning */}
+          {CONTRACTS.AMOY.HACKNFT_ADDRESS === "0x0000000000000000000000000000000000000000" && (
+            <Card className="glass-card mt-8 border-destructive/50 bg-destructive/5">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-4">
+                  <AlertCircle className="w-8 h-8 text-destructive flex-shrink-0" />
+                  <div className="space-y-3 flex-1">
+                    <div>
+                      <h3 className="text-xl font-semibold mb-2">Contract Not Deployed</h3>
+                      <p className="text-muted-foreground mb-4">
+                        The HackNFT smart contract needs to be deployed before you can mint NFTs.
+                      </p>
+                      <div className="bg-muted p-4 rounded-lg">
+                        <p className="font-mono text-sm mb-2">Deploy the contract:</p>
+                        <code className="text-xs block bg-background p-2 rounded">
+                          cd contracts<br />
+                          npm install<br />
+                          npx hardhat run scripts/deploy.ts --network amoy
+                        </code>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Success Card */}
           {isSuccess && hash && (
             <Card className="glass-card mt-8 border-primary/50 bg-primary/5">
               <CardContent className="pt-6">
@@ -256,8 +451,21 @@ const Submit = () => {
                   <div className="space-y-3 flex-1">
                     <div>
                       <h3 className="text-xl font-semibold mb-2">NFT Minted Successfully! 🎉</h3>
-                      <p className="text-muted-foreground mb-4">
-                        Your project NFT has been minted on Polygon. It will be visible on OpenSea and in your MetaMask wallet shortly.
+                      <p className="text-muted-foreground mb-2">
+                        Your project NFT has been minted on Polygon Amoy testnet.
+                      </p>
+                      {mintedTokenId && (
+                        <p className="text-sm font-semibold text-primary mb-4">
+                          Token ID: #{mintedTokenId}
+                        </p>
+                      )}
+                      {uploadedTokenURI && (
+                        <p className="text-xs text-muted-foreground mb-4 break-all">
+                          Metadata: {uploadedTokenURI}
+                        </p>
+                      )}
+                      <p className="text-sm text-muted-foreground">
+                        ⏳ It may take a few minutes to appear on OpenSea and MetaMask.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-3">
@@ -272,7 +480,7 @@ const Submit = () => {
                           rel="noopener noreferrer"
                           className="flex items-center gap-2"
                         >
-                          View on PolygonScan
+                          View Transaction
                           <ExternalLink className="w-4 h-4" />
                         </a>
                       </Button>
@@ -282,15 +490,32 @@ const Submit = () => {
                         asChild
                       >
                         <a
-                          href={`https://testnets.opensea.io/assets/amoy/${CONTRACTS.AMOY.HACKNFT_ADDRESS}/${mintedTokenId}`}
+                          href={`https://amoy.polygonscan.com/address/${CONTRACTS.AMOY.HACKNFT_ADDRESS}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-2"
                         >
-                          View on OpenSea
+                          View Contract
                           <ExternalLink className="w-4 h-4" />
                         </a>
                       </Button>
+                      {mintedTokenId && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          asChild
+                        >
+                          <a
+                            href={`https://testnets.opensea.io/assets/amoy/${CONTRACTS.AMOY.HACKNFT_ADDRESS}/${mintedTokenId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2"
+                          >
+                            View on OpenSea
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
