@@ -1,17 +1,43 @@
 import React, { useState, useEffect } from "react";
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import {
+  useAccount,
+  useReadContract,
+  useWriteContract,
+  useWaitForTransactionReceipt,
+} from "wagmi";
 import { polygonAmoy } from "wagmi/chains";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { CONTRACTS, HACKNFT_ABI } from "@/config/contract";
-import { Loader2, Send, ExternalLink, Wallet, Package } from "lucide-react";
+import {
+  Loader2,
+  Send,
+  ExternalLink,
+  Wallet,
+  Package,
+  Info,
+  Copy,
+} from "lucide-react";
 
 interface NFTData {
   tokenId: bigint;
@@ -39,8 +65,14 @@ const MyNFTs = () => {
   const [recipientAddress, setRecipientAddress] = useState("");
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
 
-  const { writeContract, data: transferHash, isPending, error: transferError } = useWriteContract();
-  const { isLoading: isTransferring, isSuccess: transferSuccess } = useWaitForTransactionReceipt({ hash: transferHash });
+  const {
+    writeContract,
+    data: transferHash,
+    isPending,
+    error: transferError,
+  } = useWriteContract();
+  const { isLoading: isTransferring, isSuccess: transferSuccess } =
+    useWaitForTransactionReceipt({ hash: transferHash });
 
   // Get user's token IDs
   const { data: tokenIds, refetch: refetchTokens } = useReadContract({
@@ -63,44 +95,50 @@ const MyNFTs = () => {
       setLoading(true);
       try {
         // Use wagmi's readContract to fetch data directly from blockchain
-        const { readContract } = await import('wagmi/actions');
-        const { config } = await import('@/config/wagmi');
-        
+        const { readContract } = await import("wagmi/actions");
+        const { config } = await import("@/config/wagmi");
+
         const nftPromises = (tokenIds as bigint[]).map(async (tokenId) => {
           try {
             // Fetch metadata from smart contract
-            const metadata = await readContract(config, {
+            const metadata = (await readContract(config, {
               address: CONTRACTS.AMOY.HACKNFT_ADDRESS as `0x${string}`,
               abi: HACKNFT_ABI,
-              functionName: 'getProjectMetadata',
+              functionName: "getProjectMetadata",
               args: [tokenId],
               chainId: polygonAmoy.id,
-            }) as any;
+            })) as any;
 
             // Fetch tokenURI from smart contract
-            const tokenURI = await readContract(config, {
+            const tokenURI = (await readContract(config, {
               address: CONTRACTS.AMOY.HACKNFT_ADDRESS as `0x${string}`,
               abi: HACKNFT_ABI,
-              functionName: 'tokenURI',
+              functionName: "tokenURI",
               args: [tokenId],
               chainId: polygonAmoy.id,
-            }) as string;
+            })) as string;
 
             // Fetch IPFS metadata for images and descriptions
             let ipfsMetadata = undefined;
             if (tokenURI) {
               try {
-                const ipfsUrl = tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
+                const ipfsUrl = tokenURI.replace(
+                  "ipfs://",
+                  "https://gateway.pinata.cloud/ipfs/"
+                );
                 const response = await fetch(ipfsUrl);
                 if (response.ok) {
                   ipfsMetadata = await response.json();
                   // Convert image IPFS URL to gateway URL
                   if (ipfsMetadata.image) {
-                    ipfsMetadata.image = ipfsMetadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
+                    ipfsMetadata.image = ipfsMetadata.image.replace(
+                      "ipfs://",
+                      "https://gateway.pinata.cloud/ipfs/"
+                    );
                   }
                 }
               } catch (error) {
-                console.error('Error fetching IPFS metadata:', error);
+                console.error("Error fetching IPFS metadata:", error);
               }
             }
 
@@ -182,7 +220,11 @@ const MyNFTs = () => {
         address: CONTRACTS.AMOY.HACKNFT_ADDRESS as `0x${string}`,
         abi: HACKNFT_ABI,
         functionName: "safeTransferFrom",
-        args: [address!, recipientAddress as `0x${string}`, selectedNFT.tokenId],
+        args: [
+          address!,
+          recipientAddress as `0x${string}`,
+          selectedNFT.tokenId,
+        ],
         chain: polygonAmoy,
       });
 
@@ -252,9 +294,61 @@ const MyNFTs = () => {
               <p className="text-xl text-muted-foreground mb-8">
                 You haven't minted any project NFTs yet
               </p>
-              <Button size="lg" onClick={() => (window.location.href = "/submit")}>
+              <Button
+                size="lg"
+                onClick={() => (window.location.href = "/submit")}
+              >
                 Submit a Project
               </Button>
+            </div>
+          )}
+
+          {/* MetaMask Import Instructions */}
+          {!loading && nfts.length > 0 && (
+            <div className="mb-8">
+              <Card className="border-blue-500/50 bg-blue-500/5">
+                <CardContent className="pt-6">
+                  <div className="flex gap-4">
+                    <Info className="w-6 h-6 text-blue-500 flex-shrink-0 mt-1" />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-lg mb-2">
+                        NFT Not Showing in MetaMask?
+                      </h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        MetaMask can take 5-30 minutes to automatically detect
+                        NFTs. To see your NFT immediately:
+                      </p>
+                      <ol className="text-sm text-muted-foreground space-y-2 mb-4 list-decimal list-inside">
+                        <li>Open MetaMask → Click "NFTs" tab</li>
+                        <li>Scroll down → Click "Import NFT"</li>
+                        <li>Enter the contract address and your token ID</li>
+                        <li>Click "Add"</li>
+                      </ol>
+                      <div className="flex items-center gap-2 p-3 bg-background/50 rounded-lg">
+                        <code className="text-xs flex-1 break-all">
+                          {CONTRACTS.AMOY.HACKNFT_ADDRESS}
+                        </code>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            navigator.clipboard.writeText(
+                              CONTRACTS.AMOY.HACKNFT_ADDRESS
+                            );
+                            toast({
+                              title: "Copied!",
+                              description:
+                                "Contract address copied to clipboard",
+                            });
+                          }}
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
 
@@ -262,7 +356,10 @@ const MyNFTs = () => {
           {!loading && nfts.length > 0 && (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
               {nfts.map((nft) => (
-                <Card key={nft.tokenId.toString()} className="glass-card hover:glow-primary transition-all duration-500">
+                <Card
+                  key={nft.tokenId.toString()}
+                  className="glass-card hover:glow-primary transition-all duration-500"
+                >
                   <CardHeader>
                     {/* Auto-loaded NFT Image from IPFS */}
                     {nft.ipfsMetadata?.image && (
@@ -272,19 +369,38 @@ const MyNFTs = () => {
                           alt={nft.metadata.projectName}
                           className="w-full h-48 object-cover"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
                           }}
                         />
                       </div>
                     )}
                     <div className="flex items-start justify-between mb-2">
-                      <CardTitle className="text-2xl">{nft.metadata.projectName}</CardTitle>
+                      <CardTitle className="text-2xl">
+                        {nft.metadata.projectName}
+                      </CardTitle>
                       <Badge variant="outline" className="border-primary/50">
                         #{nft.tokenId.toString()}
                       </Badge>
                     </div>
-                    <CardDescription className="text-base">
-                      Team: {nft.metadata.teamName}
+                    <CardDescription className="flex items-center gap-2">
+                      <Badge variant="secondary">
+                        Token ID: {nft.tokenId.toString()}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2"
+                        onClick={() => {
+                          navigator.clipboard.writeText(nft.tokenId.toString());
+                          toast({
+                            title: "Token ID Copied!",
+                            description: `Token ID ${nft.tokenId} copied to clipboard`,
+                          });
+                        }}
+                      >
+                        <Copy className="w-3 h-3" />
+                      </Button>
                     </CardDescription>
                     {nft.ipfsMetadata?.description && (
                       <p className="text-sm text-muted-foreground mt-2">
@@ -298,7 +414,9 @@ const MyNFTs = () => {
                         variant="outline"
                         size="sm"
                         className="w-full"
-                        onClick={() => window.open(nft.metadata.githubUrl, "_blank")}
+                        onClick={() =>
+                          window.open(nft.metadata.githubUrl, "_blank")
+                        }
                       >
                         <ExternalLink className="w-4 h-4 mr-2" />
                         View GitHub
@@ -321,7 +439,10 @@ const MyNFTs = () => {
                         PolygonScan
                       </Button>
                       <Dialog
-                        open={transferDialogOpen && selectedNFT?.tokenId === nft.tokenId}
+                        open={
+                          transferDialogOpen &&
+                          selectedNFT?.tokenId === nft.tokenId
+                        }
                         onOpenChange={(open) => {
                           setTransferDialogOpen(open);
                           if (open) {
@@ -350,7 +471,9 @@ const MyNFTs = () => {
                               <Label>NFT Details</Label>
                               <Card className="glass-card">
                                 <CardContent className="pt-4">
-                                  <p className="font-semibold">{nft.metadata.projectName}</p>
+                                  <p className="font-semibold">
+                                    {nft.metadata.projectName}
+                                  </p>
                                   <p className="text-sm text-muted-foreground">
                                     Token ID: #{nft.tokenId.toString()}
                                   </p>
@@ -358,17 +481,23 @@ const MyNFTs = () => {
                               </Card>
                             </div>
                             <div className="space-y-2">
-                              <Label htmlFor="recipient">Recipient Address</Label>
+                              <Label htmlFor="recipient">
+                                Recipient Address
+                              </Label>
                               <Input
                                 id="recipient"
                                 placeholder="0x..."
                                 value={recipientAddress}
-                                onChange={(e) => setRecipientAddress(e.target.value)}
+                                onChange={(e) =>
+                                  setRecipientAddress(e.target.value)
+                                }
                                 disabled={isPending || isTransferring}
                               />
                             </div>
                             {transferError && (
-                              <p className="text-sm text-red-500">{transferError.message}</p>
+                              <p className="text-sm text-red-500">
+                                {transferError.message}
+                              </p>
                             )}
                           </div>
                           <div className="flex gap-2">
@@ -386,13 +515,17 @@ const MyNFTs = () => {
                             </Button>
                             <Button
                               onClick={handleTransfer}
-                              disabled={!recipientAddress || isPending || isTransferring}
+                              disabled={
+                                !recipientAddress || isPending || isTransferring
+                              }
                               className="flex-1"
                             >
                               {isPending || isTransferring ? (
                                 <>
                                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                  {isPending ? "Confirming..." : "Transferring..."}
+                                  {isPending
+                                    ? "Confirming..."
+                                    : "Transferring..."}
                                 </>
                               ) : (
                                 <>
@@ -410,7 +543,9 @@ const MyNFTs = () => {
                       <p>
                         Minted:{" "}
                         {nft.metadata.mintedAt
-                          ? new Date(Number(nft.metadata.mintedAt) * 1000).toLocaleDateString()
+                          ? new Date(
+                              Number(nft.metadata.mintedAt) * 1000
+                            ).toLocaleDateString()
                           : "Unknown"}
                       </p>
                     </div>

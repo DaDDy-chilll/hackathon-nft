@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
@@ -15,7 +16,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
  * - ERC-6551 compatible for Token-Bound Accounts
  * - Transparent fund tracking and withdrawal
  */
-contract HackNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
+contract HackNFT is ERC721Enumerable, ERC721URIStorage, Ownable, ReentrancyGuard {
     uint256 private _tokenIdCounter;
 
     // Mapping from project hash to token ID to prevent duplicate minting
@@ -96,13 +97,13 @@ contract HackNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
      * @param projectName Name of the project
      * @param teamName Name of the team
      * @param githubUrl GitHub repository URL
-     * @param tokenURI IPFS URI for NFT metadata
+     * @param uri IPFS URI for NFT metadata
      */
     function mintProject(
         string memory projectName,
         string memory teamName,
         string memory githubUrl,
-        string memory tokenURI
+        string memory uri
     ) public returns (uint256) {
         // Create unique hash for the project
         bytes32 projectHash = keccak256(
@@ -121,7 +122,7 @@ contract HackNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
 
         // Mint NFT to sender
         _safeMint(msg.sender, newTokenId);
-        _setTokenURI(newTokenId, tokenURI);
+        _setTokenURI(newTokenId, uri);
 
         // Store project metadata
         projectMetadata[newTokenId] = ProjectMetadata({
@@ -211,12 +212,7 @@ contract HackNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
         return tokens;
     }
 
-    /**
-     * @dev Get total number of minted projects
-     */
-    function totalSupply() public view returns (uint256) {
-        return _tokenIdCounter;
-    }
+    // Note: totalSupply() is provided by ERC721Enumerable
 
     /**
      * @dev Enable crowdfunding for a project
@@ -359,4 +355,35 @@ contract HackNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
     function isFundingGoalReached(uint256 tokenId) public view returns (bool) {
         return projectFunding[tokenId].totalFunded >= projectFunding[tokenId].fundingGoal;
     }
+
+     // Required overrides for ERC721Enumerable and ERC721URIStorage
+ function _update(address to, uint256 tokenId, address auth)
+ internal
+ override(ERC721, ERC721Enumerable)
+ returns (address)
+ {
+ return super._update(to, tokenId, auth);
+ }
+ function _increaseBalance(address account, uint128 value)
+ internal
+ override(ERC721, ERC721Enumerable)
+ {
+ super._increaseBalance(account, value);
+ }
+ function tokenURI(uint256 tokenId)
+ public
+ view
+ override(ERC721, ERC721URIStorage)
+ returns (string memory)
+ {
+ return super.tokenURI(tokenId);
+ }
+ function supportsInterface(bytes4 interfaceId)
+ public
+ view
+ override(ERC721Enumerable, ERC721URIStorage)
+ returns (bool)
+ {
+ return super.supportsInterface(interfaceId);
+ }
 }

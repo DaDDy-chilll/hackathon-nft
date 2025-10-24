@@ -5,6 +5,7 @@ import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useState, useEffect } from "react";
 import MetaMaskInstructions from "./MetaMaskInstructions";
 import { useToast } from "@/hooks/use-toast";
+import { NETWORKS, DEFAULT_NETWORK } from "@/config/contract";
 
 const Navbar = () => {
   const { address, isConnected } = useAccount();
@@ -13,7 +14,80 @@ const Navbar = () => {
   const [showInstructions, setShowInstructions] = useState(false);
   const { toast } = useToast();
 
-  const handleConnectWallet = () => {
+  const switchToAmoyTestnet = async () => {
+    try {
+      const { ethereum } = window as any;
+      if (!ethereum) return;
+
+      const network = DEFAULT_NETWORK;
+
+      // Try to switch to Amoy testnet
+      await ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: network.chainId }],
+      });
+
+      toast({
+        title: "Network Switched! 🎉",
+        description: `Switched to ${network.chainName}.`,
+      });
+    } catch (switchError: any) {
+      // This error code indicates that the chain has not been added to MetaMask
+      if (switchError.code === 4902) {
+        try {
+          const network = DEFAULT_NETWORK;
+          await (window as any).ethereum.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: network.chainId,
+                chainName: network.chainName,
+                nativeCurrency: network.nativeCurrency,
+                rpcUrls: network.rpcUrls,
+                blockExplorerUrls: network.blockExplorerUrls,
+              },
+            ],
+          });
+
+          toast({
+            title: "Network Added! 🎉",
+            description: `${network.chainName} has been added to MetaMask.`,
+          });
+        } catch (addError: any) {
+          toast({
+            title: "Failed to Add Network",
+            description: addError.message,
+            variant: "destructive",
+          });
+        }
+      } else {
+        toast({
+          title: "Failed to Switch Network",
+          description: switchError.message,
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
+  const checkAndSwitchNetwork = async () => {
+    try {
+      const { ethereum } = window as any;
+      if (!ethereum) return;
+
+      const chainId = await ethereum.request({ method: "eth_chainId" });
+      const chainIdNum = parseInt(chainId, 16);
+
+      // Check if not on Amoy testnet (80002)
+      if (chainIdNum !== 80002) {
+        await switchToAmoyTestnet();
+      }
+    } catch (error) {
+      console.error("Network check failed:", error);
+    }
+  };
+
+  const handleConnectWallet = async () => {
     // Check if MetaMask is installed
     if (typeof window.ethereum === "undefined") {
       setShowInstructions(true);
@@ -26,11 +100,14 @@ const Navbar = () => {
       connect(
         { connector: injectedConnector },
         {
-          onSuccess: () => {
+          onSuccess: async () => {
             toast({
               title: "Wallet Connected! 🎉",
               description: "Your MetaMask wallet is now connected.",
             });
+            
+            // Check and switch to Amoy testnet after connection
+            await checkAndSwitchNetwork();
           },
           onError: (error) => {
             toast({
@@ -55,6 +132,43 @@ const Navbar = () => {
   const formatAddress = (addr: string) => {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
+
+
+
+   // Listen for network changes
+ useEffect(() => {
+ const { ethereum } = window as any;
+ if (!ethereum) return;
+ const handleChainChanged = (chainId: string) => {
+ const chainIdNum = parseInt(chainId, 16);
+ console.log("Network changed to:", chainIdNum);
+ // If not on Amoy testnet, prompt to switch
+ if (chainIdNum !== 80002 && isConnected) {
+ toast({
+ title: "Wrong Network",
+ description: `Please switch to ${DEFAULT_NETWORK.chainName}.`,
+ variant: "destructive",
+ });
+ // Auto-switch after a short delay
+ setTimeout(() => {
+ switchToAmoyTestnet();
+ }, 1000);
+ }
+ };
+ ethereum.on("chainChanged", handleChainChanged);
+ // Cleanup
+ return () => {
+ if (ethereum.removeListener) {
+ ethereum.removeListener("chainChanged", handleChainChanged);
+ }
+ };
+ }, [isConnected]);
+ // Check network on mount if already connected
+ useEffect(() => {
+ if (isConnected) {
+ checkAndSwitchNetwork();
+ }
+ }, [isConnected]);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 backdrop-blur-xl bg-background/80">

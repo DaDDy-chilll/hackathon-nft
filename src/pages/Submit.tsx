@@ -139,6 +139,16 @@ const Submit = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Validate required fields
+    if (!formData.name || !formData.team || !formData.github) {
+      toast({
+        title: "Missing Required Fields",
+        description: "Please fill in Project Name, Team Name, and GitHub URL.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Check if contract is deployed
     if (CONTRACTS.AMOY.HACKNFT_ADDRESS === "0x0000000000000000000000000000000000000000") {
       toast({
@@ -167,6 +177,30 @@ const Submit = () => {
 
     try {
       setIsUploading(true);
+
+      // Check if project already minted
+      if (publicClient) {
+        try {
+          const isAlreadyMinted = await publicClient.readContract({
+            address: CONTRACTS.AMOY.HACKNFT_ADDRESS as `0x${string}`,
+            abi: HACKNFT_ABI,
+            functionName: "isProjectMinted",
+            args: [formData.name, formData.team, formData.github],
+          });
+
+          if (isAlreadyMinted) {
+            setIsUploading(false);
+            toast({
+              title: "Project Already Minted",
+              description: "This project (same name, team, and GitHub URL) has already been minted as an NFT.",
+              variant: "destructive",
+            });
+            return;
+          }
+        } catch (checkError) {
+          console.warn("Could not check if project is minted:", checkError);
+        }
+      }
 
       // Upload image to IPFS if provided
       let imageUrl = "";
@@ -218,9 +252,26 @@ const Submit = () => {
       });
     } catch (err: any) {
       setIsUploading(false);
+      console.error("Minting error:", err);
+      
+      let errorMessage = "Failed to mint NFT. Please try again.";
+      
+      // Extract error message from contract revert
+      if (err?.message) {
+        if (err.message.includes("Project already minted")) {
+          errorMessage = "This project has already been minted. Please use a different project name, team, or GitHub URL.";
+        } else if (err.message.includes("user rejected")) {
+          errorMessage = "Transaction was rejected in MetaMask.";
+        } else if (err.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient funds for gas fees. Please add some POL to your wallet.";
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
       toast({
-        title: "Upload Failed",
-        description: err?.message || "Failed to upload to IPFS. Please try again.",
+        title: "Minting Failed",
+        description: errorMessage,
         variant: "destructive",
       });
     }
