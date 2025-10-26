@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Hexagon, Wallet } from "lucide-react";
+import { Hexagon, Wallet, Copy, Check } from "lucide-react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useState, useEffect } from "react";
 import MetaMaskInstructions from "./MetaMaskInstructions";
@@ -12,6 +12,7 @@ const Navbar = () => {
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const [showInstructions, setShowInstructions] = useState(false);
+  const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
   const switchToAmoyTestnet = async () => {
@@ -133,6 +134,18 @@ const Navbar = () => {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
 
+  const handleCopyAddress = () => {
+    if (address) {
+      navigator.clipboard.writeText(address);
+      setCopied(true);
+      toast({
+        title: "Address Copied!",
+        description: "Wallet address copied to clipboard.",
+      });
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
 
 
    // Listen for network changes
@@ -204,6 +217,18 @@ const Navbar = () => {
               <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 border border-primary/20">
                 <Wallet className="w-4 h-4 text-primary" />
                 <span className="text-sm font-medium">{formatAddress(address)}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 hover:bg-primary/20"
+                  onClick={handleCopyAddress}
+                >
+                  {copied ? (
+                    <Check className="w-3 h-3 text-green-500" />
+                  ) : (
+                    <Copy className="w-3 h-3 text-primary" />
+                  )}
+                </Button>
               </div>
               <Button variant="outline" size="lg" onClick={handleDisconnect}>
                 Disconnect

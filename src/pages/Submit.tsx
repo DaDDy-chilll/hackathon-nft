@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Submit.tsx
 import { useState, useEffect } from "react";
 import Navbar from "@/components/Navbar";
@@ -42,8 +43,12 @@ const Submit = () => {
   const publicClient = usePublicClient({ chainId: polygonAmoy.id });
 
   const { writeContract, data: hash, error, isPending } = useWriteContract();
-  const { data: receipt, isLoading: isConfirming, isSuccess } =
-    useWaitForTransactionReceipt({ hash });
+  const [isDuplicateChecking, setIsDuplicateChecking] = useState(false);
+  const {
+    data: receipt,
+    isLoading: isConfirming,
+    isSuccess,
+  } = useWaitForTransactionReceipt({ hash });
 
   const [formData, setFormData] = useState({
     name: "",
@@ -91,7 +96,7 @@ const Submit = () => {
     });
     if (!res.ok) throw new Error("Image upload failed");
     const data = await res.json();
-  return `https://gateway.pinata.cloud/ipfs/${data.IpfsHash}`;
+    return `https://gateway.pinata.cloud/ipfs/${data.IpfsHash}`;
   };
 
   const uploadMetadataToPinata = async (metadata: object): Promise<string> => {
@@ -142,7 +147,43 @@ const Submit = () => {
     }
 
     setIsUploading(true);
+    setIsDuplicateChecking(true);
+
     try {
+      const sanitize = (s: string) => s.trim().replace(/\s+/g, " ");
+      const name = sanitize(formData.name);
+      const team = sanitize(formData.team);
+      const github = sanitize(formData.github);
+
+      // Check if project already exists
+      if (publicClient) {
+        try {
+          const isDuplicate = await publicClient.readContract({
+            address: CONTRACTS.AMOY.HACKNFT_ADDRESS,
+            abi: HACKNFT_ABI,
+            functionName: "isProjectMinted",
+            args: [name, team, github],
+          } as any);
+
+          if (isDuplicate) {
+            toast({
+              title: "Duplicate Project",
+              description:
+                "A project with this name, team, and GitHub URL already exists.",
+              variant: "destructive",
+            });
+            setIsUploading(false);
+            setIsDuplicateChecking(false);
+            return;
+          }
+        } catch (checkErr) {
+          console.warn("Could not check for duplicates:", checkErr);
+          // Continue anyway if check fails
+        }
+      }
+
+      setIsDuplicateChecking(false);
+
       let imageUrl = "";
       if (projectImage) imageUrl = await uploadImageToPinata(projectImage);
 
@@ -159,27 +200,20 @@ const Submit = () => {
         ],
       };
 
-const tokenURI = await uploadMetadataToPinata(metadata);
-setUploadedTokenURI(tokenURI); // store for UI only
+      const tokenURI = await uploadMetadataToPinata(metadata);
+      setUploadedTokenURI(tokenURI); // store for UI only
 
-const sanitize = (s: string) => s.trim().replace(/\s+/g, " ");
+      const uri = tokenURI.trim(); // ✅ use freshly returned tokenURI, not state
 
-const name = sanitize(formData.name);
-const team = sanitize(formData.team);
-const github = sanitize(formData.github);
-const uri = tokenURI.trim(); // ✅ use freshly returned tokenURI, not state
-
-writeContract({
-  address: CONTRACTS.AMOY.HACKNFT_ADDRESS,
-  abi: HACKNFT_ABI,
-  functionName: "mintProject",
-  args: [name, team, github, uri],
-  gas: BigInt(600000),
-  chain: polygonAmoy,
-  account: address!,
-});
-
-
+      writeContract({
+        address: CONTRACTS.AMOY.HACKNFT_ADDRESS,
+        abi: HACKNFT_ABI,
+        functionName: "mintProject",
+        args: [name, team, github, uri],
+        gas: BigInt(800000), // Increased gas limit
+        chain: polygonAmoy,
+        account: address!,
+      });
     } catch (err: any) {
       console.error("Minting error:", err);
       toast({
@@ -192,6 +226,7 @@ writeContract({
       });
     } finally {
       setIsUploading(false);
+      setIsDuplicateChecking(false);
     }
   };
 
@@ -221,14 +256,30 @@ writeContract({
       console.error("Contract write error:", error);
       toast({
         title: "Transaction Error",
-        description:
-          error.message.includes("internal json-rpc")
-            ? "Internal RPC error. Try again or switch RPC endpoint."
-            : error.message,
+        description: error.message.includes("internal json-rpc")
+          ? "Internal RPC error. Try again or switch RPC endpoint."
+          : error.message,
         variant: "destructive",
       });
     }
   }, [error, toast]);
+
+  // ---- reset form on success ----
+  useEffect(() => {
+    if (isSuccess) {
+      setFormData({
+        name: "",
+        team: "",
+        description: "",
+        github: "",
+        demo: "",
+        tags: "",
+        members: "",
+      });
+      setProjectImage(null);
+      setImagePreview("");
+    }
+  }, [isSuccess]);
 
   // ---- UI ----
   return (
@@ -298,9 +349,20 @@ writeContract({
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={isUploading || isPending || isConfirming}
+                  disabled={
+                    isUploading ||
+                    isPending ||
+                    isConfirming ||
+                    isSuccess ||
+                    isDuplicateChecking
+                  }
                 >
-                  {isUploading ? (
+                  {isDuplicateChecking ? (
+                    <>
+                      <Loader2 className="mr-2 animate-spin" /> Checking for
+                      duplicates...
+                    </>
+                  ) : isUploading ? (
                     <>
                       <Loader2 className="mr-2 animate-spin" /> Uploading to
                       IPFS...
