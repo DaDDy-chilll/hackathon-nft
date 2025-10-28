@@ -37,7 +37,11 @@ import {
   Package,
   Info,
   Copy,
+  Download,
+  RefreshCw,
 } from "lucide-react";
+import { ethers } from "ethers";
+import resolveIPFS from "@/utils/getImage";
 
 interface NFTData {
   tokenId: bigint;
@@ -64,6 +68,7 @@ const MyNFTs = () => {
   const [selectedNFT, setSelectedNFT] = useState<NFTData | null>(null);
   const [recipientAddress, setRecipientAddress] = useState("");
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [claimedNFTs, setClaimedNFTs] = useState<Set<string>>(new Set());
 
   const {
     writeContract,
@@ -75,13 +80,40 @@ const MyNFTs = () => {
     useWaitForTransactionReceipt({ hash: transferHash });
 
   // Get user's token IDs
-  const { data: tokenIds, refetch: refetchTokens } = useReadContract({
+  const { data: tokenIds, refetch: refetchTokens, isRefetching } = useReadContract({
     address: CONTRACTS.AMOY.HACKNFT_ADDRESS as `0x${string}`,
     abi: HACKNFT_ABI,
     functionName: "getTokensByOwner",
     args: address ? [address] : undefined,
     chainId: polygonAmoy.id,
   });
+
+  // Check if NFT is already claimed in MetaMask
+  const checkNFTInMetaMask = async (tokenId: bigint): Promise<boolean> => {
+    try {
+      if (!window.ethereum || !address) return false;
+
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const contract = new ethers.Contract(
+        CONTRACTS.AMOY.HACKNFT_ADDRESS,
+        HACKNFT_ABI,
+        provider
+      );
+
+      // Check if the NFT is owned by the current address
+      const owner = await contract.ownerOf(tokenId.toString());
+
+      // If owned by current address, check if it's in MetaMask's watched assets
+      // We'll use localStorage to track which NFTs have been claimed
+   const claimedKey = `nft_claimed_${address.toLowerCase()}_${tokenId.toString()}`;
+const isClaimed = localStorage.getItem(claimedKey) === "true";
+
+      return isClaimed && owner.toLowerCase() === address.toLowerCase();
+    } catch (error) {
+      console.error("Error checking NFT in MetaMask:", error);
+      return false;
+    }
+  };
 
   // Fetch NFT data for each token - AUTO-DETECT from blockchain
   useEffect(() => {
@@ -122,20 +154,15 @@ const MyNFTs = () => {
             let ipfsMetadata = undefined;
             if (tokenURI) {
               try {
-                const ipfsUrl = tokenURI.replace(
-                  "ipfs://",
-                  "https://gateway.pinata.cloud/ipfs/"
-                );
+               const ipfsUrl = resolveIPFS(tokenURI);
                 const response = await fetch(ipfsUrl);
                 if (response.ok) {
                   ipfsMetadata = await response.json();
                   // Convert image IPFS URL to gateway URL
-                  if (ipfsMetadata.image) {
-                    ipfsMetadata.image = ipfsMetadata.image.replace(
-                      "ipfs://",
-                      "https://gateway.pinata.cloud/ipfs/"
-                    );
-                  }
+                if (ipfsMetadata.image) {
+  ipfsMetadata.image = resolveIPFS(ipfsMetadata.image);
+}
+
                 }
               } catch (error) {
                 console.error("Error fetching IPFS metadata:", error);
@@ -172,6 +199,37 @@ const MyNFTs = () => {
 
         const fetchedNFTs = await Promise.all(nftPromises);
         setNfts(fetchedNFTs);
+
+        console.log('fetchedNFTs', fetchedNFTs)
+
+        // Mark NFTs as claimed based on two conditions:
+        // 1. User is the original creator (auto-claimed)
+        // 2. User manually claimed it via the claim button (stored in localStorage)
+        const claimedSet = new Set<string>();
+        for (const nft of fetchedNFTs) {
+          const isCreator = address && nft.metadata.creator.toLowerCase() === address.toLowerCase();
+          console.log('isCreator', isCreator, nft.tokenId.toString());
+          
+          if (isCreator) {
+            // Auto-claim NFTs minted by the user
+            claimedSet.add(nft.tokenId.toString());
+            
+            // Save to localStorage for persistence
+             if (address) {
+    const claimedKey = `nft_claimed_${address.toLowerCase()}_${nft.tokenId.toString()}`;
+    localStorage.setItem(claimedKey, "true");
+  }
+          } else {
+            // For transferred NFTs, check if manually claimed
+            const isClaimed = await checkNFTInMetaMask(nft.tokenId);
+            console.log('isClaimed', isClaimed,nft.tokenId.toString());
+            
+            if (isClaimed) {
+              claimedSet.add(nft.tokenId.toString());
+            }
+          }
+        }
+        setClaimedNFTs(claimedSet);
       } catch (error) {
         console.error("Error fetching NFT data:", error);
         toast({
@@ -185,22 +243,56 @@ const MyNFTs = () => {
     };
 
     fetchNFTData();
-  }, [tokenIds, toast]);
+  }, [tokenIds, toast, address]);
 
   // Handle transfer success
   useEffect(() => {
-    if (transferSuccess && transferHash) {
-      toast({
-        title: "Transfer Successful!",
-        description: "NFT has been transferred to the recipient.",
-      });
-      setTransferDialogOpen(false);
-      setRecipientAddress("");
-      setSelectedNFT(null);
-      // Refetch tokens after successful transfer
-      refetchTokens();
+  if (transferSuccess && transferHash && selectedNFT) {
+  // ✅ Clean up localStorage for the transferred NFT (normalize address)
+  if (address) {
+    const claimedKey = `nft_claimed_${address.toLowerCase()}_${selectedNFT.tokenId.toString()}`;
+    localStorage.removeItem(claimedKey);
+    console.log(`🗑️ Removed localStorage for transferred NFT (Token ID: ${selectedNFT.tokenId})`);
+  }
+
+  // ✅ Remove from in-memory claimed set
+  setClaimedNFTs((prev) => {
+    const newSet = new Set(prev);
+    newSet.delete(selectedNFT.tokenId.toString());
+    return newSet;
+  });
+
+  toast({
+    title: "Transfer Successful!",
+    description: "NFT has been transferred to the recipient.",
+  });
+
+  setTransferDialogOpen(false);
+  setRecipientAddress("");
+  setSelectedNFT(null);
+
+  // ✅ Refetch tokens after successful transfer
+  refetchTokens();
+}
+
+  }, [transferSuccess, transferHash, toast, refetchTokens, selectedNFT, address]);
+
+
+useEffect(() => {
+  if (!address) return;
+  const claimedSet = new Set<string>();
+  for (const key in localStorage) {
+    if (
+      key.startsWith(`nft_claimed_${address.toLowerCase()}_`) &&
+      localStorage.getItem(key) === "true"
+    ) {
+      const tokenId = key.split("_").pop();
+      if (tokenId) claimedSet.add(tokenId);
     }
-  }, [transferSuccess, transferHash, toast, refetchTokens]);
+  }
+  setClaimedNFTs(claimedSet);
+}, [address]);
+
 
   const handleTransfer = () => {
     if (!selectedNFT || !recipientAddress) return;
@@ -226,6 +318,7 @@ const MyNFTs = () => {
           selectedNFT.tokenId,
         ],
         chain: polygonAmoy,
+        account: address!,
       });
 
       toast({
@@ -237,6 +330,117 @@ const MyNFTs = () => {
       toast({
         title: "Transfer Failed",
         description: transferError?.message || "Failed to transfer NFT",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleClaimToMetaMask = async (nft: NFTData) => {
+    try {
+      if (!window.ethereum) {
+        toast({
+          title: "MetaMask Not Found",
+          description: "Please install MetaMask to claim NFTs.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const chainId = await window.ethereum.request({ method: "eth_chainId" });
+      const chainIdNum = parseInt(chainId, 16);
+
+      console.log("Chain ID:", chainIdNum);
+      console.log("Contract Chain ID:", CONTRACTS.AMOY.CHAIN_ID);
+
+      if (chainIdNum !== CONTRACTS.AMOY.CHAIN_ID) {
+        toast({
+          title: "Wrong Network",
+          description:
+            "Please switch to Polygon Amoy Testnet to claim this NFT.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const [account] = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+      console.log("nft", nft);
+      console.log("Account:", account);
+      // Verify ownership before adding
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      console.log("Provider:", provider);
+      const contract = new ethers.Contract(
+        CONTRACTS.AMOY.HACKNFT_ADDRESS,
+        HACKNFT_ABI,
+        provider
+      );
+      console.log("Contract:", contract);
+      console.log("nft.tokenId:", nft.tokenId);
+      const owner = await contract.ownerOf(nft.tokenId.toString());
+      console.log("Owner:", owner);
+      console.log(
+        "CONTRACTS.AMOY.HACKNFT_ADDRESS:",
+        CONTRACTS.AMOY.HACKNFT_ADDRESS
+      );
+
+      if (owner.toLowerCase() !== account.toLowerCase()) {
+        toast({
+          title: "Not NFT Owner",
+          description: "This wallet does not own the selected NFT.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const imageUrl = nft.ipfsMetadata?.image?.startsWith("ipfs://")
+        ? nft.ipfsMetadata.image.replace("ipfs://", "https://ipfs.io/ipfs/")
+        : nft.ipfsMetadata?.image || "";
+
+      const wasAdded = await window.ethereum.request({
+        method: "wallet_watchAsset",
+        params: {
+          type: "ERC721",
+          options: {
+            address: CONTRACTS.AMOY.HACKNFT_ADDRESS,
+            tokenId: nft.tokenId.toString(),
+            symbol: "HACKNFT",
+            image: imageUrl,
+          },
+        },
+      });
+
+      if (wasAdded) {
+        // Mark NFT as claimed in localStorage
+    const claimedKey = `nft_claimed_${account.toLowerCase()}_${nft.tokenId.toString()}`;
+localStorage.setItem(claimedKey, "true");
+
+        // Update claimed NFTs state
+        setClaimedNFTs((prev) => new Set(prev).add(nft.tokenId.toString()));
+
+        toast({
+          title: "NFT Claimed!",
+          description: "NFT has been added to your MetaMask wallet.",
+        });
+      } else {
+        toast({
+          title: "Claim Cancelled",
+          description: "You cancelled the NFT import.",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      console.error("Error claiming NFT:", error);
+      let errorMessage = "Failed to add NFT to MetaMask. Try manual import.";
+      if (error.code === -32002) {
+        errorMessage =
+          "MetaMask cannot verify NFT ownership on Amoy yet. Please add it manually using the contract address and token ID.";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      toast({
+        title: "Claim Failed",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -270,9 +474,25 @@ const MyNFTs = () => {
         <div className="container mx-auto px-6">
           {/* Header */}
           <div className="text-center mb-16">
-            <h1 className="text-5xl md:text-7xl font-bold mb-6">
-              My <span className="gradient-text">NFTs</span>
-            </h1>
+            <div className="flex items-center justify-center gap-4 mb-6">
+              <h1 className="text-5xl md:text-7xl font-bold">
+                My <span className="gradient-text">NFTs</span>
+              </h1>
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={() => refetchTokens()} 
+                disabled={isRefetching}
+                className="h-12 w-12"
+                title="Refresh NFTs"
+              >
+                {isRefetching ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-5 w-5" />
+                )}
+              </Button>
+            </div>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
               View and manage your project NFTs
             </p>
@@ -303,54 +523,6 @@ const MyNFTs = () => {
             </div>
           )}
 
-          {/* MetaMask Import Instructions */}
-          {!loading && nfts.length > 0 && (
-            <div className="mb-8">
-              <Card className="border-blue-500/50 bg-blue-500/5">
-                <CardContent className="pt-6">
-                  <div className="flex gap-4">
-                    <Info className="w-6 h-6 text-blue-500 flex-shrink-0 mt-1" />
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-lg mb-2">
-                        NFT Not Showing in MetaMask?
-                      </h3>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        MetaMask can take 5-30 minutes to automatically detect
-                        NFTs. To see your NFT immediately:
-                      </p>
-                      <ol className="text-sm text-muted-foreground space-y-2 mb-4 list-decimal list-inside">
-                        <li>Open MetaMask → Click "NFTs" tab</li>
-                        <li>Scroll down → Click "Import NFT"</li>
-                        <li>Enter the contract address and your token ID</li>
-                        <li>Click "Add"</li>
-                      </ol>
-                      <div className="flex items-center gap-2 p-3 bg-background/50 rounded-lg">
-                        <code className="text-xs flex-1 break-all">
-                          {CONTRACTS.AMOY.HACKNFT_ADDRESS}
-                        </code>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            navigator.clipboard.writeText(
-                              CONTRACTS.AMOY.HACKNFT_ADDRESS
-                            );
-                            toast({
-                              title: "Copied!",
-                              description:
-                                "Contract address copied to clipboard",
-                            });
-                          }}
-                        >
-                          <Copy className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
 
           {/* NFT Grid */}
           {!loading && nfts.length > 0 && (
@@ -372,6 +544,7 @@ const MyNFTs = () => {
                             (e.target as HTMLImageElement).style.display =
                               "none";
                           }}
+                          crossOrigin="anonymous"
                         />
                       </div>
                     )}
@@ -423,120 +596,137 @@ const MyNFTs = () => {
                       </Button>
                     )}
 
-                    <div className="flex gap-2">
+                    <div className="space-y-2">
                       <Button
-                        variant="outline"
+                        variant="default"
                         size="sm"
-                        className="flex-1"
-                        onClick={() =>
-                          window.open(
-                            `https://amoy.polygonscan.com/token/${CONTRACTS.AMOY.HACKNFT_ADDRESS}?a=${nft.tokenId}`,
-                            "_blank"
-                          )
-                        }
+                        className="w-full"
+                        onClick={() => handleClaimToMetaMask(nft)}
+                        // disabled={claimedNFTs.has(nft.tokenId.toString())}
                       >
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        PolygonScan
+                        <Download className="w-4 h-4 mr-2" />
+                        {/* {claimedNFTs.has(nft.tokenId.toString())
+                          ? "Already Claimed"
+                          : "Claim to MetaMask"} */}
+                          Claim to MetaMask
                       </Button>
-                      <Dialog
-                        open={
-                          transferDialogOpen &&
-                          selectedNFT?.tokenId === nft.tokenId
-                        }
-                        onOpenChange={(open) => {
-                          setTransferDialogOpen(open);
-                          if (open) {
-                            setSelectedNFT(nft);
-                          } else {
-                            setSelectedNFT(null);
-                            setRecipientAddress("");
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() =>
+                            window.open(
+                              `https://amoy.polygonscan.com/token/${CONTRACTS.AMOY.HACKNFT_ADDRESS}?a=${nft.tokenId}`,
+                              "_blank"
+                            )
                           }
-                        }}
-                      >
-                        <DialogTrigger asChild>
-                          <Button size="sm" className="flex-1">
-                            <Send className="w-4 h-4 mr-2" />
-                            Transfer
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Transfer NFT</DialogTitle>
-                            <DialogDescription>
-                              Send this NFT to another Ethereum address
-                            </DialogDescription>
-                          </DialogHeader>
-                          <div className="space-y-4 py-4">
-                            <div className="space-y-2">
-                              <Label>NFT Details</Label>
-                              <Card className="glass-card">
-                                <CardContent className="pt-4">
-                                  <p className="font-semibold">
-                                    {nft.metadata.projectName}
-                                  </p>
-                                  <p className="text-sm text-muted-foreground">
-                                    Token ID: #{nft.tokenId.toString()}
-                                  </p>
-                                </CardContent>
-                              </Card>
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="recipient">
-                                Recipient Address
-                              </Label>
-                              <Input
-                                id="recipient"
-                                placeholder="0x..."
-                                value={recipientAddress}
-                                onChange={(e) =>
-                                  setRecipientAddress(e.target.value)
-                                }
-                                disabled={isPending || isTransferring}
-                              />
-                            </div>
-                            {transferError && (
-                              <p className="text-sm text-red-500">
-                                {transferError.message}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                setTransferDialogOpen(false);
-                                setRecipientAddress("");
-                                setSelectedNFT(null);
-                              }}
-                              disabled={isPending || isTransferring}
-                              className="flex-1"
-                            >
-                              Cancel
+                        >
+                          <ExternalLink className="w-4 h-4 mr-2" />
+                          PolygonScan
+                        </Button>
+                        <Dialog
+                          open={
+                            transferDialogOpen &&
+                            selectedNFT?.tokenId === nft.tokenId
+                          }
+                          onOpenChange={(open) => {
+                            setTransferDialogOpen(open);
+                            if (open) {
+                              setSelectedNFT(nft);
+                            } else {
+                              setSelectedNFT(null);
+                              setRecipientAddress("");
+                            }
+                          }}
+                        >
+                          <DialogTrigger asChild>
+                            <Button size="sm" className="flex-1">
+                              <Send className="w-4 h-4 mr-2" />
+                              Transfer
                             </Button>
-                            <Button
-                              onClick={handleTransfer}
-                              disabled={
-                                !recipientAddress || isPending || isTransferring
-                              }
-                              className="flex-1"
-                            >
-                              {isPending || isTransferring ? (
-                                <>
-                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                  {isPending
-                                    ? "Confirming..."
-                                    : "Transferring..."}
-                                </>
-                              ) : (
-                                <>
-                                  <Send className="w-4 h-4 mr-2" />
-                                  Transfer
-                                </>
+                          </DialogTrigger>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Transfer NFT</DialogTitle>
+                              <DialogDescription>
+                                Send this NFT to another Ethereum address
+                              </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4 py-4">
+                              <div className="space-y-2">
+                                <Label>NFT Details</Label>
+                                <Card className="glass-card">
+                                  <CardContent className="pt-4">
+                                    <p className="font-semibold">
+                                      {nft.metadata.projectName}
+                                    </p>
+                                    <p className="text-sm text-muted-foreground">
+                                      Token ID: #{nft.tokenId.toString()}
+                                    </p>
+                                  </CardContent>
+                                </Card>
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="recipient">
+                                  Recipient Address
+                                </Label>
+                                <Input
+                                  id="recipient"
+                                  placeholder="0x..."
+                                  value={recipientAddress}
+                                  onChange={(e) =>
+                                    setRecipientAddress(e.target.value)
+                                  }
+                                  disabled={isPending || isTransferring}
+                                />
+                              </div>
+                              {transferError && (
+                                <p className="text-sm text-red-500">
+                                  {transferError.message}
+                                </p>
                               )}
-                            </Button>
-                          </div>
-                        </DialogContent>
-                      </Dialog>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setTransferDialogOpen(false);
+                                  setRecipientAddress("");
+                                  setSelectedNFT(null);
+                                }}
+                                disabled={isPending || isTransferring}
+                                className="flex-1"
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                onClick={handleTransfer}
+                                disabled={
+                                  !recipientAddress ||
+                                  isPending ||
+                                  isTransferring
+                                }
+                                className="flex-1"
+                              >
+                                {isPending || isTransferring ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    {isPending
+                                      ? "Confirming..."
+                                      : "Transferring..."}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Send className="w-4 h-4 mr-2" />
+                                    Transfer
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                      </div>
                     </div>
 
                     <div className="text-xs text-muted-foreground pt-2 border-t border-border">
@@ -552,6 +742,65 @@ const MyNFTs = () => {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          )}
+
+
+
+
+
+
+          {/* MetaMask Import Instructions */}
+          {!loading && nfts.length > 0 && (
+            <div className="mt-8">
+              <Card className="border-blue-500/50 bg-blue-500/5">
+                <CardContent className="pt-6">
+                  <div className="flex gap-4">
+                    <Info className="w-6 h-6 text-blue-500 flex-shrink-0 mt-1" />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-lg mb-2">
+                        NFT Not Showing in MetaMask?
+                      </h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        MetaMask can take 5-30 minutes to automatically detect
+                        NFTs. To see your NFT immediately:
+                      </p>
+                      <ol className="text-sm text-muted-foreground space-y-2 mb-4 list-decimal list-inside">
+                        <li>Open MetaMask → Click "NFTs" tab</li>
+                        <li>Scroll down → Click "Import NFT"</li>
+                        <li>Enter the contract address and your token ID</li>
+                        <li>Click "Add"</li>
+                      </ol>
+                      <div className="flex items-center gap-2 p-3 bg-background/50 rounded-lg">
+                        <div className="flex-1">
+                          <p className="text-xs text-muted-foreground mb-1">
+                            Contract Address:
+                          </p>
+                          <code className="text-xs break-all">
+                            {CONTRACTS.AMOY.HACKNFT_ADDRESS}
+                          </code>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            navigator.clipboard.writeText(
+                              CONTRACTS.AMOY.HACKNFT_ADDRESS
+                            );
+                            toast({
+                              title: "Copied!",
+                              description:
+                                "Contract address copied to clipboard",
+                            });
+                          }}
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
         </div>
