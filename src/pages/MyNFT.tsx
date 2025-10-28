@@ -38,8 +38,10 @@ import {
   Info,
   Copy,
   Download,
+  RefreshCw,
 } from "lucide-react";
 import { ethers } from "ethers";
+import resolveIPFS from "@/utils/getImage";
 
 interface NFTData {
   tokenId: bigint;
@@ -78,7 +80,7 @@ const MyNFTs = () => {
     useWaitForTransactionReceipt({ hash: transferHash });
 
   // Get user's token IDs
-  const { data: tokenIds, refetch: refetchTokens } = useReadContract({
+  const { data: tokenIds, refetch: refetchTokens, isRefetching } = useReadContract({
     address: CONTRACTS.AMOY.HACKNFT_ADDRESS as `0x${string}`,
     abi: HACKNFT_ABI,
     functionName: "getTokensByOwner",
@@ -103,9 +105,8 @@ const MyNFTs = () => {
 
       // If owned by current address, check if it's in MetaMask's watched assets
       // We'll use localStorage to track which NFTs have been claimed
-      const claimedKey = `nft_claimed_${address}_${tokenId.toString()}`;
-
-      const isClaimed = localStorage.getItem(claimedKey) === "true";
+   const claimedKey = `nft_claimed_${address.toLowerCase()}_${tokenId.toString()}`;
+const isClaimed = localStorage.getItem(claimedKey) === "true";
 
       return isClaimed && owner.toLowerCase() === address.toLowerCase();
     } catch (error) {
@@ -153,20 +154,15 @@ const MyNFTs = () => {
             let ipfsMetadata = undefined;
             if (tokenURI) {
               try {
-                const ipfsUrl = tokenURI.replace(
-                  "ipfs://",
-                  "https://gateway.pinata.cloud/ipfs/"
-                );
+               const ipfsUrl = resolveIPFS(tokenURI);
                 const response = await fetch(ipfsUrl);
                 if (response.ok) {
                   ipfsMetadata = await response.json();
                   // Convert image IPFS URL to gateway URL
-                  if (ipfsMetadata.image) {
-                    ipfsMetadata.image = ipfsMetadata.image.replace(
-                      "ipfs://",
-                      "https://gateway.pinata.cloud/ipfs/"
-                    );
-                  }
+                if (ipfsMetadata.image) {
+  ipfsMetadata.image = resolveIPFS(ipfsMetadata.image);
+}
+
                 }
               } catch (error) {
                 console.error("Error fetching IPFS metadata:", error);
@@ -219,10 +215,10 @@ const MyNFTs = () => {
             claimedSet.add(nft.tokenId.toString());
             
             // Save to localStorage for persistence
-            if (address) {
-              const claimedKey = `nft_claimed_${address}_${nft.tokenId.toString()}`;
-              localStorage.setItem(claimedKey, "true");
-            }
+             if (address) {
+    const claimedKey = `nft_claimed_${address.toLowerCase()}_${nft.tokenId.toString()}`;
+    localStorage.setItem(claimedKey, "true");
+  }
           } else {
             // For transferred NFTs, check if manually claimed
             const isClaimed = await checkNFTInMetaMask(nft.tokenId);
@@ -251,32 +247,52 @@ const MyNFTs = () => {
 
   // Handle transfer success
   useEffect(() => {
-    if (transferSuccess && transferHash && selectedNFT) {
-      // Clean up localStorage for the transferred NFT
-      if (address) {
-        const claimedKey = `nft_claimed_${address}_${selectedNFT.tokenId.toString()}`;
-        localStorage.removeItem(claimedKey);
-        console.log(`🗑️ Removed localStorage for transferred NFT (Token ID: ${selectedNFT.tokenId})`);
-      }
+  if (transferSuccess && transferHash && selectedNFT) {
+  // ✅ Clean up localStorage for the transferred NFT (normalize address)
+  if (address) {
+    const claimedKey = `nft_claimed_${address.toLowerCase()}_${selectedNFT.tokenId.toString()}`;
+    localStorage.removeItem(claimedKey);
+    console.log(`🗑️ Removed localStorage for transferred NFT (Token ID: ${selectedNFT.tokenId})`);
+  }
 
-      // Remove from claimed set
-      setClaimedNFTs((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(selectedNFT.tokenId.toString());
-        return newSet;
-      });
+  // ✅ Remove from in-memory claimed set
+  setClaimedNFTs((prev) => {
+    const newSet = new Set(prev);
+    newSet.delete(selectedNFT.tokenId.toString());
+    return newSet;
+  });
 
-      toast({
-        title: "Transfer Successful!",
-        description: "NFT has been transferred to the recipient.",
-      });
-      setTransferDialogOpen(false);
-      setRecipientAddress("");
-      setSelectedNFT(null);
-      // Refetch tokens after successful transfer
-      refetchTokens();
-    }
+  toast({
+    title: "Transfer Successful!",
+    description: "NFT has been transferred to the recipient.",
+  });
+
+  setTransferDialogOpen(false);
+  setRecipientAddress("");
+  setSelectedNFT(null);
+
+  // ✅ Refetch tokens after successful transfer
+  refetchTokens();
+}
+
   }, [transferSuccess, transferHash, toast, refetchTokens, selectedNFT, address]);
+
+
+useEffect(() => {
+  if (!address) return;
+  const claimedSet = new Set<string>();
+  for (const key in localStorage) {
+    if (
+      key.startsWith(`nft_claimed_${address.toLowerCase()}_`) &&
+      localStorage.getItem(key) === "true"
+    ) {
+      const tokenId = key.split("_").pop();
+      if (tokenId) claimedSet.add(tokenId);
+    }
+  }
+  setClaimedNFTs(claimedSet);
+}, [address]);
+
 
   const handleTransfer = () => {
     if (!selectedNFT || !recipientAddress) return;
@@ -302,6 +318,7 @@ const MyNFTs = () => {
           selectedNFT.tokenId,
         ],
         chain: polygonAmoy,
+        account: address!,
       });
 
       toast({
@@ -395,8 +412,8 @@ const MyNFTs = () => {
 
       if (wasAdded) {
         // Mark NFT as claimed in localStorage
-        const claimedKey = `nft_claimed_${account}_${nft.tokenId.toString()}`;
-        localStorage.setItem(claimedKey, "true");
+    const claimedKey = `nft_claimed_${account.toLowerCase()}_${nft.tokenId.toString()}`;
+localStorage.setItem(claimedKey, "true");
 
         // Update claimed NFTs state
         setClaimedNFTs((prev) => new Set(prev).add(nft.tokenId.toString()));
@@ -457,9 +474,25 @@ const MyNFTs = () => {
         <div className="container mx-auto px-6">
           {/* Header */}
           <div className="text-center mb-16">
-            <h1 className="text-5xl md:text-7xl font-bold mb-6">
-              My <span className="gradient-text">NFTs</span>
-            </h1>
+            <div className="flex items-center justify-center gap-4 mb-6">
+              <h1 className="text-5xl md:text-7xl font-bold">
+                My <span className="gradient-text">NFTs</span>
+              </h1>
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={() => refetchTokens()} 
+                disabled={isRefetching}
+                className="h-12 w-12"
+                title="Refresh NFTs"
+              >
+                {isRefetching ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-5 w-5" />
+                )}
+              </Button>
+            </div>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
               View and manage your project NFTs
             </p>
@@ -490,59 +523,6 @@ const MyNFTs = () => {
             </div>
           )}
 
-          {/* MetaMask Import Instructions */}
-          {!loading && nfts.length > 0 && (
-            <div className="mb-8">
-              <Card className="border-blue-500/50 bg-blue-500/5">
-                <CardContent className="pt-6">
-                  <div className="flex gap-4">
-                    <Info className="w-6 h-6 text-blue-500 flex-shrink-0 mt-1" />
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-lg mb-2">
-                        NFT Not Showing in MetaMask?
-                      </h3>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        MetaMask can take 5-30 minutes to automatically detect
-                        NFTs. To see your NFT immediately:
-                      </p>
-                      <ol className="text-sm text-muted-foreground space-y-2 mb-4 list-decimal list-inside">
-                        <li>Open MetaMask → Click "NFTs" tab</li>
-                        <li>Scroll down → Click "Import NFT"</li>
-                        <li>Enter the contract address and your token ID</li>
-                        <li>Click "Add"</li>
-                      </ol>
-                      <div className="flex items-center gap-2 p-3 bg-background/50 rounded-lg">
-                        <div className="flex-1">
-                          <p className="text-xs text-muted-foreground mb-1">
-                            Contract Address:
-                          </p>
-                          <code className="text-xs break-all">
-                            {CONTRACTS.AMOY.HACKNFT_ADDRESS}
-                          </code>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            navigator.clipboard.writeText(
-                              CONTRACTS.AMOY.HACKNFT_ADDRESS
-                            );
-                            toast({
-                              title: "Copied!",
-                              description:
-                                "Contract address copied to clipboard",
-                            });
-                          }}
-                        >
-                          <Copy className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
 
           {/* NFT Grid */}
           {!loading && nfts.length > 0 && (
@@ -564,6 +544,7 @@ const MyNFTs = () => {
                             (e.target as HTMLImageElement).style.display =
                               "none";
                           }}
+                          crossOrigin="anonymous"
                         />
                       </div>
                     )}
@@ -621,12 +602,13 @@ const MyNFTs = () => {
                         size="sm"
                         className="w-full"
                         onClick={() => handleClaimToMetaMask(nft)}
-                        disabled={claimedNFTs.has(nft.tokenId.toString())}
+                        // disabled={claimedNFTs.has(nft.tokenId.toString())}
                       >
                         <Download className="w-4 h-4 mr-2" />
-                        {claimedNFTs.has(nft.tokenId.toString())
+                        {/* {claimedNFTs.has(nft.tokenId.toString())
                           ? "Already Claimed"
-                          : "Claim to MetaMask"}
+                          : "Claim to MetaMask"} */}
+                          Claim to MetaMask
                       </Button>
                       <div className="flex gap-2">
                         <Button
@@ -760,6 +742,65 @@ const MyNFTs = () => {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          )}
+
+
+
+
+
+
+          {/* MetaMask Import Instructions */}
+          {!loading && nfts.length > 0 && (
+            <div className="mt-8">
+              <Card className="border-blue-500/50 bg-blue-500/5">
+                <CardContent className="pt-6">
+                  <div className="flex gap-4">
+                    <Info className="w-6 h-6 text-blue-500 flex-shrink-0 mt-1" />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-lg mb-2">
+                        NFT Not Showing in MetaMask?
+                      </h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        MetaMask can take 5-30 minutes to automatically detect
+                        NFTs. To see your NFT immediately:
+                      </p>
+                      <ol className="text-sm text-muted-foreground space-y-2 mb-4 list-decimal list-inside">
+                        <li>Open MetaMask → Click "NFTs" tab</li>
+                        <li>Scroll down → Click "Import NFT"</li>
+                        <li>Enter the contract address and your token ID</li>
+                        <li>Click "Add"</li>
+                      </ol>
+                      <div className="flex items-center gap-2 p-3 bg-background/50 rounded-lg">
+                        <div className="flex-1">
+                          <p className="text-xs text-muted-foreground mb-1">
+                            Contract Address:
+                          </p>
+                          <code className="text-xs break-all">
+                            {CONTRACTS.AMOY.HACKNFT_ADDRESS}
+                          </code>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            navigator.clipboard.writeText(
+                              CONTRACTS.AMOY.HACKNFT_ADDRESS
+                            );
+                            toast({
+                              title: "Copied!",
+                              description:
+                                "Contract address copied to clipboard",
+                            });
+                          }}
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
         </div>
